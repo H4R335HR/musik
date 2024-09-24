@@ -15,7 +15,10 @@ def play_from_ytmusic(search_query, limit=1):
         for i in range(limit):
             video_id = results[i]["videoId"]
             url = f"https://music.youtube.com/watch?v={video_id}"
-            print(f"Found on YouTube Music: {url}")
+            title = results[i]["title"]  # Get the title of the result
+
+            # Print the title and URL
+            print(f"Now playing: \033[1m{title}\033[0m")
             
             # Try playing the song from YouTube Music
             try:
@@ -26,15 +29,26 @@ def play_from_ytmusic(search_query, limit=1):
         print("No results found on YouTube Music.")
         return False
 
-def play_from_youtube(search_query):
+def search_from_youtube(search_query):
     """Search and play from YouTube (video)."""
     print(f"Searching on YouTube for: {search_query}")
-    
+
+    result = subprocess.check_output(f"yt-dlp --get-title --get-id 'ytsearch1:{search_query}'", shell=True)
+    result = result.decode('utf-8').splitlines()
+    title = result[0]  # Extract the title
+    video_id = result[1]  # Extract the video ID
+    play_from_youtube(video_id, title)
+
+def play_from_youtube(video_url, title):
+    """Play a video from YouTube using the provided URL and title."""
+    print(f"Now playing: \033[1m{title}\033[0m")
+
     try:
-        # yt-dlp search on YouTube (ytsearch1 gets the first result)
-        subprocess.run(f"yt-dlp 'ytsearch1:{search_query}' -f bestaudio -o - | mpv -", shell=True)
+        # Use the video URL to play directly
+        subprocess.run(f"yt-dlp '{video_url}' -f bestaudio -o - | mpv -", shell=True)
     except subprocess.CalledProcessError as e:
         print(f"Error playing from YouTube: {e}")
+
 
 def get_album_playlist_url(search_query):
     """Search for an album on YouTube Music and return its playlist URL."""
@@ -53,14 +67,20 @@ def get_album_playlist_url(search_query):
         return None
 
 def extract_video_urls_from_playlist(playlist_url):
-    """Extract video URLs from a YouTube playlist URL."""
+    """Extract video URLs and titles from a YouTube playlist URL."""
     ydl_opts = {'quiet': True, 'extract_flat': True}
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         playlist_info = ydl.extract_info(playlist_url, download=False)
-        video_urls = [f"https://www.youtube.com/watch?v={entry['id']}" for entry in playlist_info['entries']]
+        video_info = [
+            {
+                'url': f"https://www.youtube.com/watch?v={entry['id']}",
+                'title': entry['title']
+            }
+            for entry in playlist_info['entries']
+        ]
     
-    return video_urls
+    return video_info
 
 if __name__ == "__main__":
     # Set up argument parsing
@@ -83,6 +103,7 @@ if __name__ == "__main__":
         print(f"Searching for album: {search_query}")
         playlist_url = get_album_playlist_url(search_query)
         args.playlist = True
+
     if args.playlist:
         if not playlist_url:
             playlist_url =  search_query
@@ -90,15 +111,16 @@ if __name__ == "__main__":
         video_links = extract_video_urls_from_playlist(playlist_url)
         
         # Play each video one by one
-        for video_link in video_links:
-            play_from_youtube(video_link)
+        for video_info in video_links:
+            play_from_youtube(video_info['url'], video_info['title'])
+
     if args.video:
-        play_from_youtube(args.search_query)
+        search_from_youtube(args.search_query)
     elif args.audio:
         # Try playing from YouTube Music first, then fallback to YouTube if available
         play_from_ytmusic(args.search_query, limit=num_results)
         print("Falling back to YouTube video...")
-        play_from_youtube(args.search_query)
+        search_from_youtube(args.search_query)
     else:
         # Default: play only from YouTube Music
         play_from_ytmusic(args.search_query, limit=num_results)
