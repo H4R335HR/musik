@@ -30,7 +30,7 @@ pip install ytmusicapi yt-dlp
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/your-username/musik.git
+   git clone https://github.com/H4R335HR/musik.git
    cd musik
    ```
 
