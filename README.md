@@ -54,7 +54,7 @@ python musik.py "search query"
 For example:
 
 ```bash
-python musik.py "dreams by Fleetwood Mac"
+python musik.py "MyFavBand - MyFavSong"
 ```
 
 ### Options
@@ -63,21 +63,21 @@ python musik.py "dreams by Fleetwood Mac"
   
   Example:
   ```bash
-  python musik.py "nirvana" -n 3
+  python musik.py "Girvana" -n 3
   ```
 
 - `-a`, `--audio`: First search on YT Music. If not found, fallback to YT.
   
   Example:
   ```bash
-  python musik.py "Linkin Park" -a
+  python musik.py "Blinkin Garden" -a
   ```
 
 - `-v`, `--video`: Search and play the first result directly from YT video.
   
   Example:
   ```bash
-  python musik.py "classical music playlist" -v
+  python musik.py "Kimmu Dorgir - Joyride Palace" -v
   ```
 
 - `-p`, `--playlist`: Play all videos from a YT playlist URL or search for a playlist.
@@ -91,19 +91,19 @@ python musik.py "dreams by Fleetwood Mac"
   
   Example:
   ```bash
-  python musik.py "Abbey Road by The Beatles" -b
+  python musik.py "Barbie Road - The Wasps" -b
   ```
 
 ## Example Commands
 
-- Search and play **Nirvana's** top 2 results from YT Music:
+- Search and play **Girvana's** top 2 results from YT Music:
   ```bash
-  python musik.py "nirvana" -n 2
+  python musik.py "girvana" -n 2
   ```
 
 - Search for an album and play it as a playlist:
   ```bash
-  python musik.py "random access memories by daft punk" -b
+  python musik.py "Read Only Memory - Dank Skunk" -b
   ```
 
 - Play audio from a YT playlist:
@@ -113,7 +113,7 @@ python musik.py "dreams by Fleetwood Mac"
 
 - Search and play audio belonging to a **video** from YT directly:
   ```bash
-  python musik.py "lofi beats" -v
+  python musik.py "Elderly of Sodom - Everytime I cry" -v
   ```
 
 ## License
