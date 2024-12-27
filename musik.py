@@ -146,43 +146,77 @@ def extract_video_urls_from_playlist(playlist_url):
 if __name__ == "__main__":
     # Set up argument parsing
     parser = argparse.ArgumentParser(description="Search and play music from YouTube Music or YouTube.")
-    parser.add_argument("search_query", help="The search query for the track")
-    parser.add_argument("-n", "--num-results", type=int, default=1, help="Number of results to play (default is 1)")
-    parser.add_argument("-a", "--audio", action="store_true", help="First play from YouTube Music, then fallback to YouTube video if available")
-    parser.add_argument("-v", "--video", action="store_true", help="Search and play directly from YouTube video")
-    parser.add_argument("-p", "--playlist", action="store_true", help="Play all videos from a YouTube playlist")
-    parser.add_argument("-b", "--album", action="store_true", help="Search and play album from YouTube Music")
-    parser.add_argument("-l", "--lyrics", action="store_true", help="Show lyrics if available")
+    
+    # Create a mutually exclusive group for search_query and input file
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("search_query", nargs="?", help="The search query for the track")
+    input_group.add_argument("-i", "--infile", type=argparse.FileType('r'), 
+                            help="Input file containing newline-separated tracks")
+    
+    parser.add_argument("-n", "--num-results", type=int, default=1, 
+                        help="Number of results to play (default is 1)")
+    parser.add_argument("-a", "--audio", action="store_true", 
+                        help="First play from YouTube Music, then fallback to YouTube video if available")
+    parser.add_argument("-v", "--video", action="store_true", 
+                        help="Search and play directly from YouTube video")
+    parser.add_argument("-p", "--playlist", action="store_true", 
+                        help="Play all videos from a YouTube playlist")
+    parser.add_argument("-b", "--album", action="store_true", 
+                        help="Search and play album from YouTube Music")
+    parser.add_argument("-l", "--lyrics", action="store_true", 
+                        help="Show lyrics if available")
 
     # Parse the arguments
     args = parser.parse_args()
-    search_query = args.search_query
     num_results = args.num_results
     playlist_url = None
 
-    # Determine the source based on provided options
-    if args.album:
-        print(f"Searching for album: {search_query}")
-        playlist_url = get_album_playlist_url(search_query)
-        args.playlist = True
-
-    if args.playlist:
-        if not playlist_url:
-            playlist_url =  search_query
-        print(f"Extracting videos from playlist: {playlist_url}")
-        video_links = extract_video_urls_from_playlist(playlist_url)
+    # Handle input file or search query
+    if args.infile:
+        # Read tracks from file
+        tracks = [line.strip() for line in args.infile if line.strip()]
+        args.infile.close()
         
-        # Play each video one by one
-        for video_info in video_links:
-            play_from_youtube(video_info['url'], video_info['title'])
-
-    if args.video:
-        search_from_youtube(args.search_query)
-    elif args.audio:
-        # Try playing from YouTube Music first, then fallback to YouTube if available
-        play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics)
-        print("Falling back to YouTube video...")
-        search_from_youtube(args.search_query)
+        # Process each track
+        for track in tracks:
+            print(f"\nProcessing track: {track}")
+            if args.video:
+                search_from_youtube(track)
+            elif args.audio:
+                # Try playing from YouTube Music first, then fallback to YouTube
+                if not play_from_ytmusic(track, limit=num_results, show_lyrics=args.lyrics):
+                    print("Falling back to YouTube video...")
+                    search_from_youtube(track)
+            else:
+                # Default: play only from YouTube Music
+                play_from_ytmusic(track, limit=num_results, show_lyrics=args.lyrics)
     else:
-        # Default: play only from YouTube Music
-        play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics)
+        # Process single search query
+        search_query = args.search_query
+        
+        # Determine the source based on provided options
+        if args.album:
+            print(f"Searching for album: {search_query}")
+            playlist_url = get_album_playlist_url(search_query)
+            args.playlist = True
+
+        if args.playlist:
+            if not playlist_url:
+                playlist_url =  search_query
+            print(f"Extracting videos from playlist: {playlist_url}")
+            video_links = extract_video_urls_from_playlist(playlist_url)
+            
+            # Play each video one by one
+            for video_info in video_links:
+                play_from_youtube(video_info['url'], video_info['title'])
+
+        if args.video:
+            search_from_youtube(args.search_query)
+        elif args.audio:
+            # Try playing from YouTube Music first, then fallback to YouTube if available
+            play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics)
+            print("Falling back to YouTube video...")
+            search_from_youtube(args.search_query)
+        else:
+            # Default: play only from YouTube Music
+            play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics)
