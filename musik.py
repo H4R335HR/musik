@@ -1,4 +1,5 @@
 import sys
+import time
 import ytmusicapi
 import subprocess
 import argparse
@@ -15,16 +16,21 @@ def play_from_ytmusic(search_query, limit=1):
         for i in range(limit):
             video_id = results[i]["videoId"]
             url = f"https://music.youtube.com/watch?v={video_id}"
-            title = results[i]["title"]  # Get the title of the result
-
-            # Print the title and URL
+            title = results[i]["title"]
             print(f"Now playing: \033[1m{title}\033[0m")
             
-            # Try playing the song from YouTube Music
+            # Record start time
+            start_time = time.time()
+            
             try:
                 subprocess.run(f"yt-dlp '{url}' -f bestaudio -o - | mpv -", shell=True)
             except subprocess.CalledProcessError as e:
                 print(f"Error playing from YouTube Music: {e}")
+            
+            # Calculate and display duration
+            end_time = time.time()
+            duration = end_time - start_time
+            print(f"Played for: {int(duration)} seconds")
     else:
         print("No results found on YouTube Music.")
         return False
@@ -42,12 +48,19 @@ def search_from_youtube(search_query):
 def play_from_youtube(video_url, title):
     """Play a video from YouTube using the provided URL and title."""
     print(f"Now playing: \033[1m{title}\033[0m")
-
+    
+    # Record start time
+    start_time = time.time()
+    
     try:
-        # Use the video URL to play directly
         subprocess.run(f"yt-dlp '{video_url}' -f bestaudio -o - | mpv -", shell=True)
     except subprocess.CalledProcessError as e:
         print(f"Error playing from YouTube: {e}")
+    
+    # Calculate and display duration
+    end_time = time.time()
+    duration = end_time - start_time
+    print(f"Played for: {int(duration)} seconds")
 
 
 def get_album_playlist_url(search_query):
