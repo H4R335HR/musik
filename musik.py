@@ -4,33 +4,81 @@ import ytmusicapi
 import subprocess
 import argparse
 import yt_dlp
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
 
-def play_from_ytmusic(search_query, limit=1):
-    """Search and play from YouTube Music."""
+def play_from_ytmusic(search_query, limit=1, show_lyrics=False):
+    console = Console()
     yt = ytmusicapi.YTMusic()
-    
-    # Search for the song on YouTube Music
     results = yt.search(query=search_query, filter="songs", limit=limit)
-    
     if results:
         for i in range(limit):
+            total_duration = int(results[i].get('duration_seconds', 0))
             video_id = results[i]["videoId"]
-            url = f"https://music.youtube.com/watch?v={video_id}"
             title = results[i]["title"]
-            print(f"Now playing: \033[1m{title}\033[0m")
-            
-            # Record start time
+            artists = results[i].get("artists", [])
+            artist_names = ", ".join([artist.get("name", "") for artist in artists])
+            album = results[i].get("album", {})
+            album_name = album.get("name", "Unknown Album")
+            year = results[i].get("year", "N/A")
+            url = f"https://music.youtube.com/watch?v={video_id}"
+
+            # Print track info using Rich
+            console.print(Panel(f"""
+[cyan]Title:[/cyan] [bold]{title}[/bold]
+[cyan]Artist:[/cyan] {artist_names}
+[cyan]Album:[/cyan] {album_name}
+[cyan]Year:[/cyan] {year}
+[cyan]Duration:[/cyan] {total_duration}s
+""", title="Track Information"))
+
+            # Try to get lyrics
+            if show_lyrics:
+                try:
+                    watch_playlist = yt.get_watch_playlist(videoId=video_id)
+                    if watch_playlist and 'lyrics' in watch_playlist:
+                        lyrics_browse_id = watch_playlist['lyrics']
+                        lyrics_data = yt.get_lyrics(lyrics_browse_id)
+                        if lyrics_data and 'lyrics' in lyrics_data:
+                            console.print(Panel(
+                                Text(lyrics_data['lyrics'],
+                                    style="italic grey bold",
+                                    justify="center"),
+                                title="[bold green]Lyrics[/bold green]",
+                                border_style="green"
+                            ))
+                        else:
+                            console.print(Panel(
+                                "[yellow]Lyrics not available for this song[/yellow]",
+                                border_style="yellow"
+                            ))
+                    else:
+                        console.print(Panel(
+                            "[yellow]Lyrics not available for this song[/yellow]",
+                            border_style="yellow"
+                        ))
+                except Exception as e:
+                    console.print(Panel(
+                        f"[red]Couldn't fetch lyrics: {e}[/red]",
+                        border_style="red"
+                    ))
+
             start_time = time.time()
-            
             try:
                 subprocess.run(f"yt-dlp '{url}' -f bestaudio -o - | mpv -", shell=True)
             except subprocess.CalledProcessError as e:
-                print(f"Error playing from YouTube Music: {e}")
-            
-            # Calculate and display duration
-            end_time = time.time()
-            duration = end_time - start_time
-            print(f"Played for: {int(duration)} seconds")
+                console.print(Panel(
+                    f"[red]Error playing from YouTube Music: {e}[/red]",
+                    border_style="red"
+                ))
+
+            played_duration = int(time.time() - start_time)
+            percentage = (played_duration / total_duration) * 100 if total_duration > 0 else 0
+            console.print(Panel(
+                f"[green]Played {played_duration}s of {total_duration}s ({percentage:.1f}%)[/green]",
+                border_style="green"
+            ))
     else:
         print("No results found on YouTube Music.")
         return False
@@ -104,6 +152,7 @@ if __name__ == "__main__":
     parser.add_argument("-v", "--video", action="store_true", help="Search and play directly from YouTube video")
     parser.add_argument("-p", "--playlist", action="store_true", help="Play all videos from a YouTube playlist")
     parser.add_argument("-b", "--album", action="store_true", help="Search and play album from YouTube Music")
+    parser.add_argument("-l", "--lyrics", action="store_true", help="Show lyrics if available")
 
     # Parse the arguments
     args = parser.parse_args()
@@ -131,9 +180,9 @@ if __name__ == "__main__":
         search_from_youtube(args.search_query)
     elif args.audio:
         # Try playing from YouTube Music first, then fallback to YouTube if available
-        play_from_ytmusic(args.search_query, limit=num_results)
+        play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics)
         print("Falling back to YouTube video...")
         search_from_youtube(args.search_query)
     else:
         # Default: play only from YouTube Music
-        play_from_ytmusic(args.search_query, limit=num_results)
+        play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics)
