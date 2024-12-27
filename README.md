@@ -115,7 +115,11 @@ python musik.py "MyFavBand - MyFavSong"
   ```bash
   python musik.py "Elderly of Sodom - Everytime I cry" -v
   ```
-
+  
+- Play audio with lyrics:
+  ```bash
+  python musik.py "Mojira - Adoration for Nun" -l
+  
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
