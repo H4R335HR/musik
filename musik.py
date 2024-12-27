@@ -43,7 +43,7 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False):
                         if lyrics_data and 'lyrics' in lyrics_data:
                             console.print(Panel(
                                 Text(lyrics_data['lyrics'],
-                                    style="italic grey bold",
+                                    style="italic gold1",
                                     justify="center"),
                                 title="[bold green]Lyrics[/bold green]",
                                 border_style="green"
