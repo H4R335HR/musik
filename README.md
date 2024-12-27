@@ -1,7 +1,7 @@
 
 # Musik 🎵
 
-Musik is a simple command-line tool that allows you to search and play music directly from YT Music and YT. Whether you want to play individual tracks, albums, or playlists, Musik has got you covered. With support for both audio and video, it can handle flexible media playback using external tools like `yt-dlp` and `mpv`.
+Musik is a simple command-line tool that allows you to search and play music directly from YT Music and YT. Whether you want to play individual tracks, albums, or playlists, Musik has got you covered. Does not play video but can audio track from videos, also it can handle flexible media playback using external tools like `yt-dlp` and `mpv`.
 
 ## Features
 
