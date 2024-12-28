@@ -40,8 +40,7 @@ if 'lastfm' not in config:
     print(f"Error: 'lastfm' section missing in {CONFIG_PATH}")
     exit(1)
 
-API_KEY = config['lastfm']['api_key']
-API_SECRET = config['lastfm']['api_secret']
+
 
 def scrobble_track(artist, title, timestamp, session_key, api_key, api_secret, album=None, duration=None):
     parameters = {
@@ -313,9 +312,20 @@ def generate_api_sig(parameters, api_secret):
     # Generate MD5 hash
     return hashlib.md5(signature.encode('utf-8')).hexdigest()
 
+def decode(s):
+    mid_index = len(s) // 2
+    swapped = s[mid_index:] + s[:mid_index]
+    reversed_s = swapped[::-1]
+    decoded = ''.join(chr((ord(c) - ord('a') + 3) % 26 + ord('a')) if c.isalpha() else c for c in reversed_s.lower())
+    return decoded
+
 # In your main script:
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SESSION_KEY_PATH = os.path.join(SCRIPT_DIR, '.session_key')
+
+
+API_KEY = decode(config['lastfm']['api_key'])
+API_SECRET = decode(config['lastfm']['api_secret'])
 
 # Try to get existing session key or create new one
 try:
