@@ -1,14 +1,78 @@
 import sys
+import os
 import time
 import ytmusicapi
 import subprocess
 import argparse
 import yt_dlp
+import configparser
+import webbrowser
+import hashlib
+import urllib.parse
+import urllib.request
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-def play_from_ytmusic(search_query, limit=1, show_lyrics=False):
+# Get the directory where the script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(SCRIPT_DIR, 'config.ini')
+
+# Check if config file exists
+if not os.path.exists(CONFIG_PATH):
+    print(f"Config file not found. Creating a new one at {CONFIG_PATH}")
+    config = configparser.ConfigParser()
+    config['lastfm'] = {
+        'api_key': 'your_api_key_here',
+        'api_secret': 'your_api_secret_here'
+    }
+    with open(CONFIG_PATH, 'w') as configfile:
+        config.write(configfile)
+    print("Please edit config.ini and add your Last.fm API credentials")
+    exit(1)
+
+# Load config
+config = configparser.ConfigParser()
+config.read(CONFIG_PATH)
+
+# Check if lastfm section exists
+if 'lastfm' not in config:
+    print(f"Error: 'lastfm' section missing in {CONFIG_PATH}")
+    exit(1)
+
+API_KEY = config['lastfm']['api_key']
+API_SECRET = config['lastfm']['api_secret']
+
+def scrobble_track(artist, title, timestamp, session_key, api_key, api_secret, album=None, duration=None):
+    parameters = {
+        'method': 'track.scrobble',
+        'api_key': api_key,
+        'sk': session_key,
+        'artist': artist,
+        'track': title,
+        'timestamp': str(int(timestamp))
+    }
+    
+    if album:
+        parameters['album'] = album
+    if duration:
+        parameters['duration'] = str(int(duration))
+    
+    signature = generate_api_sig(parameters, api_secret)
+    parameters['api_sig'] = signature
+    
+    data = urllib.parse.urlencode(parameters).encode('utf-8')
+    url = "http://ws.audioscrobbler.com/2.0/"
+    
+    try:
+        request = urllib.request.Request(url, data=data)
+        response = urllib.request.urlopen(request)
+        return True
+    except Exception as e:
+        print(f"Scrobbling failed: {e}")
+        return False
+
+def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=False):
     console = Console()
     yt = ytmusicapi.YTMusic()
     results = yt.search(query=search_query, filter="songs", limit=limit)
@@ -74,7 +138,44 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False):
                 ))
 
             played_duration = int(time.time() - start_time)
-            percentage = (played_duration / total_duration) * 100 if total_duration > 0 else 0
+            # Cap the percentage at 100%
+            percentage = min(100, (played_duration / total_duration) * 100 if total_duration > 0 else 0)
+
+            # Add the scrobbling check
+            if enable_scrobble:
+                try:
+                    timestamp = int(time.time())
+                    success = scrobble_track(
+                        artist=artist_names,
+                        title=title,
+                        timestamp=timestamp,
+                        session_key=SESSION_KEY,
+                        api_key=API_KEY,
+                        api_secret=API_SECRET,
+                        album=album_name,
+                        duration=total_duration
+                    )
+                    
+                    if success:
+                        console.print(Panel(
+                            "[bold green]Successfully scrobbled to Last.fm![/bold green]",
+                            border_style="green"
+                        ))
+                    else:
+                        console.print(Panel(
+                            "[bold red]Failed to scrobble to Last.fm[/bold red]",
+                            border_style="red"
+                        ))
+                except Exception as e:
+                    console.print(Panel(
+                        f"[bold red]Scrobbling error: {str(e)}[/bold red]",
+                        border_style="red"
+                    ))
+            else:
+                console.print(Panel(
+                    "[yellow]Scrobbling is disabled. Use -s or --scrobble to enable.[/yellow]",
+                    border_style="yellow"
+                ))
             console.print(Panel(
                 f"[green]Played {played_duration}s of {total_duration}s ({percentage:.1f}%)[/green]",
                 border_style="green"
@@ -143,6 +244,92 @@ def extract_video_urls_from_playlist(playlist_url):
     
     return video_info
 
+def get_session_key(api_key, api_secret):
+    # Step 1: Get a token
+    parameters = {
+        'api_key': api_key,
+        'method': "auth.getToken"
+    }
+    
+    # Generate API signature
+    auth_token = get_token(parameters, api_secret)
+    
+    # Step 2: Get user authorization
+    auth_url = f"http://www.last.fm/api/auth/?api_key={api_key}&token={auth_token}"
+    webbrowser.open(auth_url)
+    
+    print("Please authorize the application in your browser.")
+    input("Press Enter after authorization...")
+    
+    # Step 3: Get session key
+    parameters = {
+        'api_key': api_key,
+        'method': "auth.getSession",
+        'token': auth_token
+    }
+    
+    # Generate API signature
+    signature = generate_api_sig(parameters, api_secret)
+    parameters['api_sig'] = signature
+    
+    # Make API request
+    url = f"http://ws.audioscrobbler.com/2.0/?{urllib.parse.urlencode(parameters)}"
+    try:
+        response = urllib.request.urlopen(url).read()
+        
+        # Extract session key from response
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(response)
+        session_key = root.find('.//key').text
+        return session_key
+    except Exception as e:
+        print(f"Error getting session key: {e}")
+        return None
+
+def get_token(parameters, api_secret):
+    # Generate API signature
+    signature = generate_api_sig(parameters, api_secret)
+    parameters['api_sig'] = signature
+    
+    # Make API request
+    url = f"http://ws.audioscrobbler.com/2.0/?{urllib.parse.urlencode(parameters)}"
+    response = urllib.request.urlopen(url).read()
+    
+    # Extract token from response
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(response)
+    return root.find('token').text
+
+def generate_api_sig(parameters, api_secret):
+    # Sort parameters alphabetically
+    sorted_params = sorted(parameters.items())
+    
+    # Concatenate parameters
+    signature = ''.join([f"{k}{v}" for k, v in sorted_params])
+    
+    # Add API secret
+    signature += api_secret
+    
+    # Generate MD5 hash
+    return hashlib.md5(signature.encode('utf-8')).hexdigest()
+
+# In your main script:
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SESSION_KEY_PATH = os.path.join(SCRIPT_DIR, '.session_key')
+
+# Try to get existing session key or create new one
+try:
+    with open(SESSION_KEY_PATH, 'r') as f:
+        SESSION_KEY = f.read().strip()
+except FileNotFoundError:
+    SESSION_KEY = get_session_key(API_KEY, API_SECRET)
+    if SESSION_KEY:
+        with open(SESSION_KEY_PATH, 'w') as f:
+            f.write(SESSION_KEY)
+    else:
+        print("Failed to get session key")
+        exit(1)
+
 if __name__ == "__main__":
     # Set up argument parsing
     parser = argparse.ArgumentParser(description="Search and play music from YouTube Music or YouTube.")
@@ -165,6 +352,8 @@ if __name__ == "__main__":
                         help="Search and play album from YouTube Music")
     parser.add_argument("-l", "--lyrics", action="store_true", 
                         help="Show lyrics if available")
+    parser.add_argument("-s", "--scrobble", action="store_true",
+                   help="Enable scrobbling to Last.fm")
 
     # Parse the arguments
     args = parser.parse_args()
@@ -184,12 +373,12 @@ if __name__ == "__main__":
                 search_from_youtube(track)
             elif args.audio:
                 # Try playing from YouTube Music first, then fallback to YouTube
-                if not play_from_ytmusic(track, limit=num_results, show_lyrics=args.lyrics):
+                if not play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble):
                     print("Falling back to YouTube video...")
                     search_from_youtube(track)
             else:
                 # Default: play only from YouTube Music
-                play_from_ytmusic(track, limit=num_results, show_lyrics=args.lyrics)
+                play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble)
     else:
         # Process single search query
         search_query = args.search_query
@@ -214,9 +403,9 @@ if __name__ == "__main__":
             search_from_youtube(args.search_query)
         elif args.audio:
             # Try playing from YouTube Music first, then fallback to YouTube if available
-            play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics)
+            play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble)
             print("Falling back to YouTube video...")
             search_from_youtube(args.search_query)
         else:
             # Default: play only from YouTube Music
-            play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics)
+            play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble)
