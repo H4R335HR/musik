@@ -84,7 +84,16 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
             artist_names = ", ".join([artist.get("name", "") for artist in artists])
             album = results[i].get("album", {})
             album_name = album.get("name", "Unknown Album")
-            year = results[i].get("year", "N/A")
+            #year = results[i].get("year", "N/A")
+            if album.get("id"):  # If no album_year was passed and we have an album ID
+                try:
+                    album_details = yt.get_album(album["id"])
+                    year = album_details.get("year", "N/A")
+                except:
+                    year = "N/A"
+            else:
+                year = results[i].get("year", "N/A")
+
             url = f"https://music.youtube.com/watch?v={video_id}"
 
             # Print track info using Rich
@@ -94,7 +103,7 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
 [cyan]Album:[/cyan] {album_name}
 [cyan]Year:[/cyan] {year}
 [cyan]Duration:[/cyan] {total_duration}s
-""", title="Track Information"))
+""", title="♫ Track Information ♫"))
 
             # Try to get lyrics
             if show_lyrics:
@@ -211,21 +220,44 @@ def play_from_youtube(video_url, title):
     print(f"Played for: {int(duration)} seconds")
 
 
-def get_album_playlist_url(search_query):
-    """Search for an album on YouTube Music and return its playlist URL."""
+def play_album_from_ytmusic(search_query, show_lyrics=False, enable_scrobble=False):
+    console = Console() 
     yt = ytmusicapi.YTMusic()
-    
-    # Search for the album on YouTube Music
+    # Search for the album
     results = yt.search(query=search_query, filter="albums", limit=1)
     
     if results:
-        album_id = results[0]["playlistId"]
-        url = f"https://music.youtube.com/playlist?list={album_id}"
-        print(f"Found album on YouTube Music: {url}")
-        return url
+        album = results[0]
+        album_id = album["browseId"]
+        
+        # Get full album details including track list
+        album_details = yt.get_album(album_id)
+        
+        console.print(Panel(f"""
+        [bold magenta]╔══ ALBUM DETAILS ══╗[/bold magenta]
+        
+        [gold1]Album:[/gold1] [bold white]{album_details['title']}[/bold white]
+        [gold1]Artist:[/gold1] [bold white]{album_details['artists'][0]['name']}[/bold white]
+        [gold1]Year:[/gold1] [bold white]{album_details.get('year', 'N/A')}[/bold white]
+        [gold1]Total Tracks:[/gold1] [bold white]{len(album_details['tracks'])}[/bold white]
+        
+        [bold magenta]╚═══════════════════╝[/bold magenta]
+        """, 
+        title="[bold magenta]♫ Now Playing Album ♫[/bold magenta]",
+        border_style="magenta",
+        padding=(0, 2)))
+
+        # Add a separator between album info and tracks
+        console.print("[magenta]═" * 50 + "[/magenta]\n")
+
+        # Play each track using play_from_ytmusic
+        for track in album_details['tracks']:
+            search_query = f"{track['title']} {track['artists'][0]['name']}"
+            play_from_ytmusic(search_query, limit=1, 
+                            show_lyrics=show_lyrics, 
+                            enable_scrobble=enable_scrobble)
     else:
-        print("No results found on YouTube Music.")
-        return None
+        print("Album not found on YouTube Music.")
 
 def extract_video_urls_from_playlist(playlist_url):
     """Extract video URLs and titles from a YouTube playlist URL."""
@@ -396,8 +428,9 @@ if __name__ == "__main__":
         # Determine the source based on provided options
         if args.album:
             print(f"Searching for album: {search_query}")
-            playlist_url = get_album_playlist_url(search_query)
-            args.playlist = True
+            play_album_from_ytmusic(search_query, 
+                                show_lyrics=args.lyrics, 
+                                enable_scrobble=args.scrobble)
 
         if args.playlist:
             if not playlist_url:
