@@ -20,25 +20,16 @@ CONFIG_PATH = os.path.join(SCRIPT_DIR, 'config.ini')
 
 # Check if config file exists
 if not os.path.exists(CONFIG_PATH):
-    print(f"Config file not found. Creating a new one at {CONFIG_PATH}")
+    print(f"Config file not found at {CONFIG_PATH}")
+    exit(1)
+else:
+    # Load config
     config = configparser.ConfigParser()
-    config['lastfm'] = {
-        'api_key': 'your_api_key_here',
-        'api_secret': 'your_api_secret_here'
-    }
-    with open(CONFIG_PATH, 'w') as configfile:
-        config.write(configfile)
-    print("Please edit config.ini and add your Last.fm API credentials")
-    exit(1)
-
-# Load config
-config = configparser.ConfigParser()
-config.read(CONFIG_PATH)
-
-# Check if lastfm section exists
-if 'lastfm' not in config:
-    print(f"Error: 'lastfm' section missing in {CONFIG_PATH}")
-    exit(1)
+    config.read(CONFIG_PATH)
+    # Check if lastfm section exists
+    if 'lastfm' not in config:
+        print(f"Error: 'lastfm' section missing in {CONFIG_PATH}")
+        exit(1)
 
 
 
