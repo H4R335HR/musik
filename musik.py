@@ -141,7 +141,7 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
             percentage = min(100, (played_duration / total_duration) * 100 if total_duration > 0 else 0)
 
             # Add the scrobbling check
-            if enable_scrobble:
+            if enable_scrobble and (percentage > 50 or played_duration > 240):
                 try:
                     timestamp = int(time.time())
                     success = scrobble_track(
@@ -305,7 +305,7 @@ def decode(s):
     reversed_s = swapped[::-1]
     decoded = ''.join(chr((ord(c) - ord('a') + 3) % 26 + ord('a')) if c.isalpha() else c for c in reversed_s.lower())
     return decoded
-    
+
 def generate_api_sig(parameters, api_secret):
     # Sort parameters alphabetically
     sorted_params = sorted(parameters.items())
