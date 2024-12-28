@@ -299,6 +299,13 @@ def get_token(parameters, api_secret):
     root = ET.fromstring(response)
     return root.find('token').text
 
+def decode(s):
+    mid_index = len(s) // 2
+    swapped = s[mid_index:] + s[:mid_index]
+    reversed_s = swapped[::-1]
+    decoded = ''.join(chr((ord(c) - ord('a') + 3) % 26 + ord('a')) if c.isalpha() else c for c in reversed_s.lower())
+    return decoded
+    
 def generate_api_sig(parameters, api_secret):
     # Sort parameters alphabetically
     sorted_params = sorted(parameters.items())
@@ -312,14 +319,7 @@ def generate_api_sig(parameters, api_secret):
     # Generate MD5 hash
     return hashlib.md5(signature.encode('utf-8')).hexdigest()
 
-def decode(s):
-    mid_index = len(s) // 2
-    swapped = s[mid_index:] + s[:mid_index]
-    reversed_s = swapped[::-1]
-    decoded = ''.join(chr((ord(c) - ord('a') + 3) % 26 + ord('a')) if c.isalpha() else c for c in reversed_s.lower())
-    return decoded
-
-# In your main script:
+# Getting session key file
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SESSION_KEY_PATH = os.path.join(SCRIPT_DIR, '.session_key')
 
