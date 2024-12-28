@@ -8,7 +8,12 @@ Musik is a simple command-line tool that allows you to search and play music dir
 - Search and play songs from **YT Music**.
 - Fallback to **YT** videos when a song isn't found on YT Music.
 - Play albums and playlists from YT Music or YT.
-- Choose the number of search results to play.
+- Show lyrics (when available)
+- Scrobble to Last.fm
+- Play entire albums
+- Play from playlists
+- Process multiple tracks from a file
+- Rich terminal output with track information
 - Works with external tools like `yt-dlp` and `mpv` for seamless media playback.
 
 ## Requirements
