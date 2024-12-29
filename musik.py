@@ -211,7 +211,7 @@ def play_from_youtube(video_url, title):
     print(f"Played for: {int(duration)} seconds")
 
 
-def play_album_from_ytmusic(search_query, show_lyrics=False, enable_scrobble=False):
+def play_album_from_ytmusic(search_query, show_lyrics=False, enable_scrobble=False, offset=0):
     console = Console() 
     yt = ytmusicapi.YTMusic()
     # Search for the album
@@ -240,12 +240,18 @@ def play_album_from_ytmusic(search_query, show_lyrics=False, enable_scrobble=Fal
 
         # Add a separator between album info and tracks
         console.print("[magenta]═" * 50 + "[/magenta]\n")
-
-        # Play each track using play_from_ytmusic
-        for track in album_details['tracks']:
+        total_tracks = len(album_details['tracks'])
+        if offset >= total_tracks:
+            console.print(f"[red]Offset {offset} is larger than the number of tracks ({total_tracks})[/red]")
+            return
+        
+        if offset > 0:
+            console.print(f"[yellow]Starting from track {offset + 1} of {total_tracks}[/yellow]")
+        # Play each track starting from offset
+        for track in album_details['tracks'][offset:]:
             search_query = f"{track['title']} {track['artists'][0]['name']}"
-            play_from_ytmusic(search_query, limit=1, 
-                            show_lyrics=show_lyrics, 
+            play_from_ytmusic(search_query, limit=1,
+                            show_lyrics=show_lyrics,
                             enable_scrobble=enable_scrobble)
     else:
         print("Album not found on YouTube Music.")
@@ -387,6 +393,8 @@ if __name__ == "__main__":
                         help="Show lyrics if available")
     parser.add_argument("-s", "--scrobble", action="store_true",
                    help="Enable scrobbling to Last.fm")
+    parser.add_argument("-o", "--offset", type=int, default=0,
+                    help="Start playing from this track number (0-based index)")
 
     # Parse the arguments
     args = parser.parse_args()
@@ -399,19 +407,25 @@ if __name__ == "__main__":
         tracks = [line.strip() for line in args.infile if line.strip()]
         args.infile.close()
         
-        # Process each track
-        for track in tracks:
+        # Check offset validity
+        if args.offset >= len(tracks):
+            print(f"Offset {args.offset} is larger than the number of tracks ({len(tracks)})")
+            exit(1)
+        
+        if args.offset > 0:
+            print(f"Starting from track {args.offset + 1} of {len(tracks)}")
+        
+        # Process each track starting from offset
+        for track in tracks[args.offset:]:
             print(f"\nProcessing track: {track}")
             if args.video:
                 search_from_youtube(track)
             elif args.audio:
-                # Try playing from YouTube Music first, then fallback to YouTube
-                if not play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble):
+                if not play_from_ytmusic(track, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble):
                     print("Falling back to YouTube video...")
                     search_from_youtube(track)
             else:
-                # Default: play only from YouTube Music
-                play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble)
+                play_from_ytmusic(track, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble)
     else:
         # Process single search query
         search_query = args.search_query
@@ -419,18 +433,26 @@ if __name__ == "__main__":
         # Determine the source based on provided options
         if args.album:
             print(f"Searching for album: {search_query}")
-            play_album_from_ytmusic(search_query, 
-                                show_lyrics=args.lyrics, 
-                                enable_scrobble=args.scrobble)
-
+            play_album_from_ytmusic(search_query,
+                                show_lyrics=args.lyrics,
+                                enable_scrobble=args.scrobble,
+                                offset=args.offset)
         if args.playlist:
             if not playlist_url:
-                playlist_url =  search_query
+                playlist_url = search_query
             print(f"Extracting videos from playlist: {playlist_url}")
             video_links = extract_video_urls_from_playlist(playlist_url)
             
-            # Play each video one by one
-            for video_info in video_links:
+            # Check offset validity
+            if args.offset >= len(video_links):
+                print(f"Offset {args.offset} is larger than the number of videos ({len(video_links)})")
+                exit(1)
+            
+            if args.offset > 0:
+                print(f"Starting from video {args.offset + 1} of {len(video_links)}")
+            
+            # Play each video starting from offset
+            for video_info in video_links[args.offset:]:
                 play_from_youtube(video_info['url'], video_info['title'])
 
         if args.video:
