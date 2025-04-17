@@ -14,26 +14,26 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+# Global debug flag (will be set by command line args)
+DEBUG = False
+
+def debug_print(*args, **kwargs):
+    """Print debug information only when DEBUG mode is enabled"""
+    if DEBUG:
+        print("DEBUG:", *args, **kwargs)
+
 # Get the directory where the script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, 'config.ini')
 
-# Check if config file exists
-if not os.path.exists(CONFIG_PATH):
-    print(f"Config file not found at {CONFIG_PATH}")
-    exit(1)
-else:
-    # Load config
-    config = configparser.ConfigParser()
-    config.read(CONFIG_PATH)
-    # Check if lastfm section exists
-    if 'lastfm' not in config:
-        print(f"Error: 'lastfm' section missing in {CONFIG_PATH}")
-        exit(1)
+# Config file will be loaded only when needed for scrobbling
 
 
 
 def scrobble_track(artist, title, timestamp, session_key, api_key, api_secret, album=None, duration=None):
+    debug_print(f"Scrobbling track: {title} by {artist}")
+    debug_print(f"  Album: {album}, Duration: {duration}s, Timestamp: {timestamp}")
+    
     parameters = {
         'method': 'track.scrobble',
         'api_key': api_key,
@@ -63,9 +63,15 @@ def scrobble_track(artist, title, timestamp, session_key, api_key, api_secret, a
         return False
 
 def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=False):
+    debug_print(f"Searching YouTube Music for: '{search_query}'")
+    debug_print(f"  Limit: {limit}, Show lyrics: {show_lyrics}, Scrobble: {enable_scrobble}")
+    
     console = Console()
     yt = ytmusicapi.YTMusic()
+    
+    debug_print("Executing YouTube Music search...")
     results = yt.search(query=search_query, filter="songs", limit=limit)
+    debug_print(f"Found {len(results)} result(s)")
     if results:
         for i in range(limit):
             total_duration = int(results[i].get('duration_seconds', 0))
@@ -129,7 +135,7 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
 
             start_time = time.time()
             try:
-                subprocess.run(f"yt-dlp '{url}' -f bestaudio -o - | mpv -", shell=True)
+                subprocess.run(f'yt-dlp "{url}" -f bestaudio -o - | mpv -', shell=True)
             except subprocess.CalledProcessError as e:
                 console.print(Panel(
                     f"[red]Error playing from YouTube Music: {e}[/red]",
@@ -142,7 +148,20 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
 
             # Add the scrobbling check
             if enable_scrobble and (percentage > 50 or played_duration > 240):
+                global API_KEY, API_SECRET, SESSION_KEY
+                
+                # Check if Last.fm credentials are initialized
+                if API_KEY is None or API_SECRET is None or SESSION_KEY is None:
+                    debug_print("Last.fm credentials not initialized, initializing now")
+                    if not init_lastfm():
+                        console.print(Panel(
+                            "[bold red]Failed to initialize Last.fm credentials. Scrobbling disabled.[/bold red]",
+                            border_style="red"
+                        ))
+                        return False
+                
                 try:
+                    debug_print(f"Attempting to scrobble: {title} by {artist_names}")
                     timestamp = int(time.time())
                     success = scrobble_track(
                         artist=artist_names,
@@ -171,10 +190,12 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
                         border_style="red"
                     ))
             else:
-                console.print(Panel(
-                    "[yellow]Scrobbling is disabled. Use -s or --scrobble to enable.[/yellow]",
-                    border_style="yellow"
-                ))
+                debug_print(f"Skipping scrobble: enable_scrobble={enable_scrobble}, percentage={percentage}%, played_duration={played_duration}s")
+                if not enable_scrobble:
+                    console.print(Panel(
+                        "[yellow]Scrobbling is disabled. Use -s or --scrobble to enable.[/yellow]",
+                        border_style="yellow"
+                    ))
             console.print(Panel(
                 f"[green]Played {played_duration}s of {total_duration}s ({percentage:.1f}%)[/green]",
                 border_style="green"
@@ -186,8 +207,10 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
 def search_from_youtube(search_query):
     """Search and play from YouTube (video)."""
     print(f"Searching on YouTube for: {search_query}")
+    debug_print(f"Executing YouTube search for: '{search_query}'")
 
-    result = subprocess.check_output(f"yt-dlp --get-title --get-id 'ytsearch1:{search_query}'", shell=True)
+    debug_print("Running yt-dlp to get video title and ID...")
+    result = subprocess.check_output(f'yt-dlp --get-title --get-id "ytsearch1:{search_query}"', shell=True)
     result = result.decode('utf-8').splitlines()
     title = result[0]  # Extract the title
     video_id = result[1]  # Extract the video ID
@@ -196,12 +219,16 @@ def search_from_youtube(search_query):
 def play_from_youtube(video_url, title):
     """Play a video from YouTube using the provided URL and title."""
     print(f"Now playing: \033[1m{title}\033[0m")
+    debug_print(f"Playing YouTube video: {title}")
+    debug_print(f"Video URL: {video_url}")
     
     # Record start time
     start_time = time.time()
+    debug_print(f"Starting playback at: {time.strftime('%H:%M:%S', time.localtime(start_time))}")
     
     try:
-        subprocess.run(f"yt-dlp '{video_url}' -f bestaudio -o - | mpv -", shell=True)
+        debug_print("Executing yt-dlp to stream audio to mpv...")
+        subprocess.run(f'yt-dlp "{video_url}" -f bestaudio -o - | mpv -', shell=True)
     except subprocess.CalledProcessError as e:
         print(f"Error playing from YouTube: {e}")
     
@@ -212,10 +239,15 @@ def play_from_youtube(video_url, title):
 
 
 def play_album_from_ytmusic(search_query, show_lyrics=False, enable_scrobble=False, offset=0):
-    console = Console() 
+    debug_print(f"Searching for album: '{search_query}'")
+    debug_print(f"  Show lyrics: {show_lyrics}, Scrobble: {enable_scrobble}, Offset: {offset}")
+    
+    console = Console()
     yt = ytmusicapi.YTMusic()
     # Search for the album
+    debug_print("Executing YouTube Music album search...")
     results = yt.search(query=search_query, filter="albums", limit=1)
+    debug_print(f"Found {len(results)} album result(s)")
     
     if results:
         album = results[0]
@@ -258,10 +290,15 @@ def play_album_from_ytmusic(search_query, show_lyrics=False, enable_scrobble=Fal
 
 def extract_video_urls_from_playlist(playlist_url):
     """Extract video URLs and titles from a YouTube playlist URL."""
+    debug_print(f"Extracting videos from playlist: {playlist_url}")
+    
     ydl_opts = {'quiet': True, 'extract_flat': True}
+    debug_print("YDL options:", ydl_opts)
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        debug_print("Fetching playlist information...")
         playlist_info = ydl.extract_info(playlist_url, download=False)
+        debug_print(f"Found {len(playlist_info.get('entries', []))} videos in playlist")
         video_info = [
             {
                 'url': f"https://www.youtube.com/watch?v={entry['id']}",
@@ -273,6 +310,9 @@ def extract_video_urls_from_playlist(playlist_url):
     return video_info
 
 def get_session_key(api_key, api_secret):
+    debug_print("Getting Last.fm session key")
+    debug_print("Step 1: Getting authentication token")
+    
     # Step 1: Get a token
     parameters = {
         'api_key': api_key,
@@ -280,7 +320,9 @@ def get_session_key(api_key, api_secret):
     }
     
     # Generate API signature
+    debug_print("Requesting auth token from Last.fm API...")
     auth_token = get_token(parameters, api_secret)
+    debug_print(f"Received auth token: {auth_token[:4]}...{auth_token[-4:]}")
     
     # Step 2: Get user authorization
     auth_url = f"http://www.last.fm/api/auth/?api_key={api_key}&token={auth_token}"
@@ -348,26 +390,66 @@ def generate_api_sig(parameters, api_secret):
     # Generate MD5 hash
     return hashlib.md5(signature.encode('utf-8')).hexdigest()
 
-# Getting session key file
+# Session key path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SESSION_KEY_PATH = os.path.join(SCRIPT_DIR, '.session_key')
 
+# Last.fm credentials - will be initialized only when needed
+API_KEY = None
+API_SECRET = None
+SESSION_KEY = None
 
-API_KEY = decode(config['lastfm']['api_key'])
-API_SECRET = decode(config['lastfm']['api_secret'])
-
-# Try to get existing session key or create new one
-try:
-    with open(SESSION_KEY_PATH, 'r') as f:
-        SESSION_KEY = f.read().strip()
-except FileNotFoundError:
-    SESSION_KEY = get_session_key(API_KEY, API_SECRET)
-    if SESSION_KEY:
-        with open(SESSION_KEY_PATH, 'w') as f:
-            f.write(SESSION_KEY)
-    else:
-        print("Failed to get session key")
-        exit(1)
+def init_lastfm():
+    """Initialize Last.fm credentials for scrobbling"""
+    global API_KEY, API_SECRET, SESSION_KEY
+    
+    debug_print("Initializing Last.fm credentials for scrobbling")
+    
+    # Check if config file exists
+    debug_print(f"Looking for config file at: {CONFIG_PATH}")
+    if not os.path.exists(CONFIG_PATH):
+        print(f"Config file not found at {CONFIG_PATH}. Scrobbling will be disabled.")
+        debug_print("Config file not found, disabling scrobbling")
+        return False
+        
+    # Load config
+    debug_print("Config file found, loading contents")
+    config = configparser.ConfigParser()
+    config.read(CONFIG_PATH)
+    debug_print(f"Config sections: {list(config.sections())}")
+    
+    # Check if lastfm section exists
+    if 'lastfm' not in config:
+        print(f"Error: 'lastfm' section missing in {CONFIG_PATH}. Scrobbling will be disabled.")
+        debug_print("'lastfm' section missing in config, disabling scrobbling")
+        return False
+        
+    debug_print("Config loaded successfully")
+    
+    # Decode API key and secret
+    API_KEY = decode(config['lastfm']['api_key'])
+    API_SECRET = decode(config['lastfm']['api_secret'])
+    
+    # Try to get existing session key or create new one
+    debug_print(f"Checking for existing session key at: {SESSION_KEY_PATH}")
+    try:
+        with open(SESSION_KEY_PATH, 'r') as f:
+            SESSION_KEY = f.read().strip()
+            debug_print("Loaded existing session key")
+    except FileNotFoundError:
+        debug_print("No session key found, getting a new one")
+        SESSION_KEY = get_session_key(API_KEY, API_SECRET)
+        if SESSION_KEY:
+            debug_print("Saving new session key")
+            with open(SESSION_KEY_PATH, 'w') as f:
+                f.write(SESSION_KEY)
+        else:
+            debug_print("Failed to get session key from Last.fm")
+            print("Failed to get session key. Scrobbling will be disabled.")
+            return False
+    
+    debug_print("Last.fm credentials initialized successfully")
+    return True
 
 if __name__ == "__main__":
     # Set up argument parsing
@@ -395,21 +477,33 @@ if __name__ == "__main__":
                    help="Enable scrobbling to Last.fm")
     parser.add_argument("-o", "--offset", type=int, default=0,
                     help="Start playing from this track number (0-based index)")
+    parser.add_argument("-d", "--debug", action="store_true",
+                    help="Enable debug mode to show detailed execution information")
 
     # Parse the arguments
     args = parser.parse_args()
+    
+    # Set global debug flag
+    DEBUG = args.debug
+    
+    debug_print("Command line arguments:", args)
+    debug_print(f"Debug mode: {'Enabled' if DEBUG else 'Disabled'}")
+    
     num_results = args.num_results
     playlist_url = None
 
     # Handle input file or search query
     if args.infile:
+        debug_print(f"Reading tracks from file: {args.infile.name}")
         # Read tracks from file
         tracks = [line.strip() for line in args.infile if line.strip()]
         args.infile.close()
+        debug_print(f"Read {len(tracks)} tracks from input file")
         
         # Check offset validity
         if args.offset >= len(tracks):
             print(f"Offset {args.offset} is larger than the number of tracks ({len(tracks)})")
+            debug_print(f"Invalid offset value: {args.offset}, max allowed: {len(tracks)-1}")
             exit(1)
         
         if args.offset > 0:
@@ -429,23 +523,29 @@ if __name__ == "__main__":
     else:
         # Process single search query
         search_query = args.search_query
+        debug_print(f"Processing single search query: '{search_query}'")
         
         # Determine the source based on provided options
         if args.album:
+            debug_print("Album mode selected")
             print(f"Searching for album: {search_query}")
             play_album_from_ytmusic(search_query,
                                 show_lyrics=args.lyrics,
                                 enable_scrobble=args.scrobble,
                                 offset=args.offset)
         if args.playlist:
+            debug_print("Playlist mode selected")
             if not playlist_url:
                 playlist_url = search_query
+                debug_print(f"Using search query as playlist URL: {playlist_url}")
             print(f"Extracting videos from playlist: {playlist_url}")
             video_links = extract_video_urls_from_playlist(playlist_url)
+            debug_print(f"Extracted {len(video_links)} videos from playlist")
             
             # Check offset validity
             if args.offset >= len(video_links):
                 print(f"Offset {args.offset} is larger than the number of videos ({len(video_links)})")
+                debug_print(f"Invalid offset value: {args.offset}, max allowed: {len(video_links)-1}")
                 exit(1)
             
             if args.offset > 0:
@@ -456,12 +556,16 @@ if __name__ == "__main__":
                 play_from_youtube(video_info['url'], video_info['title'])
 
         if args.video:
+            debug_print("Video mode selected, searching directly on YouTube")
             search_from_youtube(args.search_query)
         elif args.audio:
+            debug_print("Audio mode selected, trying YouTube Music with fallback to YouTube video")
             # Try playing from YouTube Music first, then fallback to YouTube if available
             play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble)
+            debug_print("YouTube Music playback completed, falling back to YouTube video")
             print("Falling back to YouTube video...")
             search_from_youtube(args.search_query)
         else:
+            debug_print("Default mode: YouTube Music only")
             # Default: play only from YouTube Music
             play_from_ytmusic(args.search_query, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble)
