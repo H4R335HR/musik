@@ -10,6 +10,7 @@ import webbrowser
 import hashlib
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -28,6 +29,61 @@ CONFIG_PATH = os.path.join(SCRIPT_DIR, 'config.ini')
 
 # Config file will be loaded only when needed for scrobbling
 
+
+def format_count(n):
+    """Format a large number into a human-readable string (e.g. 1.2M, 340K)."""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return "N/A"
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.1f}B"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
+def get_yt_view_count(yt, video_id):
+    """Fetch YouTube view count via ytmusicapi's get_song()."""
+    debug_print(f"Fetching YT view count for videoId: {video_id}")
+    try:
+        song_details = yt.get_song(video_id)
+        view_count = song_details.get('videoDetails', {}).get('viewCount')
+        debug_print(f"YT view count: {view_count}")
+        return int(view_count) if view_count else None
+    except Exception as e:
+        debug_print(f"Failed to get YT view count: {e}")
+        return None
+
+
+def get_lastfm_track_info(artist, track, api_key):
+    """Fetch track listeners and playcount from Last.fm's track.getInfo endpoint."""
+    debug_print(f"Fetching Last.fm stats for: {track} by {artist}")
+    params = {
+        'method': 'track.getInfo',
+        'api_key': api_key,
+        'artist': artist,
+        'track': track,
+        'format': 'json',
+    }
+    url = f"http://ws.audioscrobbler.com/2.0/?{urllib.parse.urlencode(params)}"
+    try:
+        response = urllib.request.urlopen(url, timeout=5).read()
+        import json
+        data = json.loads(response)
+        track_data = data.get('track', {})
+        listeners = track_data.get('listeners')
+        playcount = track_data.get('playcount')
+        debug_print(f"Last.fm listeners: {listeners}, playcount: {playcount}")
+        return {
+            'listeners': int(listeners) if listeners else None,
+            'playcount': int(playcount) if playcount else None,
+        }
+    except Exception as e:
+        debug_print(f"Failed to get Last.fm track info: {e}")
+        return {'listeners': None, 'playcount': None}
 
 
 def scrobble_track(artist, title, timestamp, session_key, api_key, api_secret, album=None, duration=None):
@@ -93,6 +149,31 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
 
             url = f"https://music.youtube.com/watch?v={video_id}"
 
+            # --- Popularity stats ---
+            yt_views = get_yt_view_count(yt, video_id)
+
+            lastfm_info = {'listeners': None, 'playcount': None}
+            if enable_scrobble:
+                global API_KEY, API_SECRET, SESSION_KEY
+                # Ensure Last.fm credentials are ready before querying
+                if API_KEY is None or API_SECRET is None or SESSION_KEY is None:
+                    debug_print("Last.fm credentials not initialized, initializing now (for stats)")
+                    if not init_lastfm():
+                        console.print("[yellow]Last.fm init failed — skipping Last.fm stats[/yellow]")
+                    # After init_lastfm(), API_KEY should be set even if SESSION_KEY failed
+                if API_KEY:
+                    lastfm_info = get_lastfm_track_info(artist_names, title, API_KEY)
+
+            # Build the popularity line(s)
+            popularity_lines = ""
+            if yt_views is not None:
+                popularity_lines += f"[cyan]YT Views:[/cyan] {format_count(yt_views)}\n"
+            if lastfm_info['listeners'] is not None:
+                popularity_lines += (
+                    f"[cyan]Last.fm:[/cyan] {format_count(lastfm_info['listeners'])} listeners · "
+                    f"{format_count(lastfm_info['playcount'])} plays\n"
+                )
+
             # Print track info using Rich
             console.print(Panel(f"""
 [cyan]Title:[/cyan] [bold]{title}[/bold]
@@ -100,7 +181,7 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
 [cyan]Album:[/cyan] {album_name}
 [cyan]Year:[/cyan] {year}
 [cyan]Duration:[/cyan] {total_duration}s
-""", title="♫ Track Information ♫"))
+{popularity_lines}""", title="♫ Track Information ♫"))
 
             # Try to get lyrics
             if show_lyrics:
@@ -148,8 +229,6 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
 
             # Add the scrobbling check
             if enable_scrobble and (percentage > 50 or played_duration > 240):
-                global API_KEY, API_SECRET, SESSION_KEY
-                
                 # Check if Last.fm credentials are initialized
                 if API_KEY is None or API_SECRET is None or SESSION_KEY is None:
                     debug_print("Last.fm credentials not initialized, initializing now")
@@ -348,7 +427,6 @@ def get_session_key(api_key, api_secret):
         response = urllib.request.urlopen(url).read()
         
         # Extract session key from response
-        import xml.etree.ElementTree as ET
         root = ET.fromstring(response)
         session_key = root.find('.//key').text
         return session_key
@@ -366,7 +444,6 @@ def get_token(parameters, api_secret):
     response = urllib.request.urlopen(url).read()
     
     # Extract token from response
-    import xml.etree.ElementTree as ET
     root = ET.fromstring(response)
     return root.find('token').text
 
