@@ -586,9 +586,10 @@ if __name__ == "__main__":
         if args.offset > 0:
             print(f"Starting from track {args.offset + 1} of {len(tracks)}")
         
+        console = Console()
         # Process each track starting from offset
         for track in tracks[args.offset:]:
-            print(f"\nProcessing track: {track}")
+            console.print(f"\n[bold yellow]▶ INPUT RECEIVED:[/bold yellow] [bold white]{track}[/bold white]")
             if args.video:
                 search_from_youtube(track)
             elif args.audio:
