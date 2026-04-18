@@ -30,6 +30,25 @@ CONFIG_PATH = os.path.join(SCRIPT_DIR, 'config.ini')
 # Config file will be loaded only when needed for scrobbling
 
 
+def parse_count(s):
+    if not s:
+        return None
+    s = str(s).upper().strip()
+    multiplier = 1
+    if s.endswith('K'):
+        multiplier = 1000
+        s = s[:-1]
+    elif s.endswith('M'):
+        multiplier = 1000000
+        s = s[:-1]
+    elif s.endswith('B'):
+        multiplier = 1000000000
+        s = s[:-1]
+    try:
+        return int(float(s) * multiplier)
+    except ValueError:
+        return None
+
 def format_count(n):
     """Format a large number into a human-readable string (e.g. 1.2M, 340K)."""
     try:
@@ -118,9 +137,10 @@ def scrobble_track(artist, title, timestamp, session_key, api_key, api_secret, a
         print(f"Scrobbling failed: {e}")
         return False
 
-def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=False):
+def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=False, min_yt_views=None, min_lf_plays=None, min_lf_listens=None):
     debug_print(f"Searching YouTube Music for: '{search_query}'")
     debug_print(f"  Limit: {limit}, Show lyrics: {show_lyrics}, Scrobble: {enable_scrobble}")
+    debug_print(f"  Min YT views: {min_yt_views}, Min LF plays: {min_lf_plays}, Min LF listens: {min_lf_listens}")
     
     console = Console()
     yt = ytmusicapi.YTMusic()
@@ -152,8 +172,15 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
             # --- Popularity stats ---
             yt_views = get_yt_view_count(yt, video_id)
 
+            if min_yt_views is not None:
+                if yt_views is None or yt_views < min_yt_views:
+                    console.print(f"[yellow]Skipping '{title}' - YT views ({format_count(yt_views) if yt_views is not None else 'N/A'}) < required ({format_count(min_yt_views)})[/yellow]")
+                    if i == limit - 1:
+                        return "SKIPPED"
+                    continue
+
             lastfm_info = {'listeners': None, 'playcount': None}
-            if enable_scrobble:
+            if enable_scrobble or min_lf_plays is not None or min_lf_listens is not None:
                 global API_KEY, API_SECRET, SESSION_KEY
                 # Ensure Last.fm credentials are ready before querying
                 if API_KEY is None or API_SECRET is None or SESSION_KEY is None:
@@ -163,6 +190,22 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
                     # After init_lastfm(), API_KEY should be set even if SESSION_KEY failed
                 if API_KEY:
                     lastfm_info = get_lastfm_track_info(artist_names, title, API_KEY)
+
+            if min_lf_plays is not None:
+                playcount = lastfm_info['playcount']
+                if playcount is None or playcount < min_lf_plays:
+                    console.print(f"[yellow]Skipping '{title}' - LF plays ({format_count(playcount) if playcount is not None else 'N/A'}) < required ({format_count(min_lf_plays)})[/yellow]")
+                    if i == limit - 1:
+                        return "SKIPPED"
+                    continue
+
+            if min_lf_listens is not None:
+                listeners = lastfm_info['listeners']
+                if listeners is None or listeners < min_lf_listens:
+                    console.print(f"[yellow]Skipping '{title}' - LF listeners ({format_count(listeners) if listeners is not None else 'N/A'}) < required ({format_count(min_lf_listens)})[/yellow]")
+                    if i == limit - 1:
+                        return "SKIPPED"
+                    continue
 
             # Build the popularity line(s)
             popularity_lines = ""
@@ -283,17 +326,28 @@ def play_from_ytmusic(search_query, limit=1, show_lyrics=False, enable_scrobble=
         print("No results found on YouTube Music.")
         return False
 
-def search_from_youtube(search_query):
+def search_from_youtube(search_query, min_yt_views=None):
     """Search and play from YouTube (video)."""
     print(f"Searching on YouTube for: {search_query}")
     debug_print(f"Executing YouTube search for: '{search_query}'")
 
-    debug_print("Running yt-dlp to get video title and ID...")
-    result = subprocess.check_output(f'yt-dlp --get-title --get-id "ytsearch1:{search_query}"', shell=True)
-    result = result.decode('utf-8').splitlines()
-    title = result[0]  # Extract the title
-    video_id = result[1]  # Extract the video ID
-    play_from_youtube(video_id, title)
+    debug_print("Running yt-dlp to get video title, ID, and view count...")
+    try:
+        result = subprocess.check_output(f'yt-dlp --print title --print id --print view_count "ytsearch1:{search_query}"', shell=True)
+        result = result.decode('utf-8').splitlines()
+        if len(result) >= 2:
+            title = result[0]
+            video_id = result[1]
+            if min_yt_views is not None:
+                view_count = int(result[2]) if len(result) >= 3 and result[2].isdigit() else 0
+                if view_count < min_yt_views:
+                    Console().print(f"[yellow]Skipping '{title}' - YT views ({format_count(view_count)}) < required ({format_count(min_yt_views)})[/yellow]")
+                    return "SKIPPED"
+            play_from_youtube(video_id, title)
+            return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error searching on YouTube: {e}")
+    return False
 
 def play_from_youtube(video_url, title):
     """Play a video from YouTube using the provided URL and title."""
@@ -556,6 +610,12 @@ if __name__ == "__main__":
                     help="Start playing from this track number (0-based index)")
     parser.add_argument("-d", "--debug", action="store_true",
                     help="Enable debug mode to show detailed execution information")
+    parser.add_argument("-gy", "--greater-youtube", type=str,
+                    help="Skip track if YT views are less than given value (e.g., 200K, 3M)")
+    parser.add_argument("-gp", "--greater-plays", type=str,
+                    help="Skip track if Last.fm playcount is less than given value")
+    parser.add_argument("-gl", "--greater-listens", type=str,
+                    help="Skip track if Last.fm listeners are less than given value")
 
     # Parse the arguments
     args = parser.parse_args()
@@ -568,6 +628,9 @@ if __name__ == "__main__":
     
     num_results = args.num_results
     playlist_url = None
+    min_yt_views = parse_count(args.greater_youtube) if args.greater_youtube else None
+    min_lf_plays = parse_count(args.greater_plays) if args.greater_plays else None
+    min_lf_listens = parse_count(args.greater_listens) if args.greater_listens else None
 
     # Handle input file or search query
     if args.infile:
@@ -586,18 +649,22 @@ if __name__ == "__main__":
         if args.offset > 0:
             print(f"Starting from track {args.offset + 1} of {len(tracks)}")
         
-        console = Console()
         # Process each track starting from offset
         for track in tracks[args.offset:]:
-            console.print(f"\n[bold yellow]▶ INPUT RECEIVED:[/bold yellow] [bold white]{track}[/bold white]")
+            print(f"\nProcessing track: {track}")
             if args.video:
-                search_from_youtube(track)
+                search_from_youtube(track, min_yt_views=min_yt_views)
             elif args.audio:
-                if not play_from_ytmusic(track, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble):
+                res = play_from_ytmusic(track, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble, min_yt_views=min_yt_views, min_lf_plays=min_lf_plays, min_lf_listens=min_lf_listens)
+                if res == "SKIPPED":
+                    continue
+                if not res:
                     print("Falling back to YouTube video...")
-                    search_from_youtube(track)
+                    search_from_youtube(track, min_yt_views=min_yt_views)
             else:
-                play_from_ytmusic(track, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble)
+                res = play_from_ytmusic(track, limit=num_results, show_lyrics=args.lyrics, enable_scrobble=args.scrobble, min_yt_views=min_yt_views, min_lf_plays=min_lf_plays, min_lf_listens=min_lf_listens)
+                if res == "SKIPPED":
+                    continue
     else:
         # Process single search query
         search_query = args.search_query
