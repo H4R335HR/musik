@@ -35,13 +35,14 @@ class MusicBrainzAPI:
             
         return response.json()
 
-    def get_random_song(self, min_year, genre=None, year_explicit=False, keyword=None):
-        """Gets a random song, with optional genre, year, and keyword filters.
+    def get_random_song(self, min_year, genre=None, year_explicit=False, keyword=None, artist_search=None):
+        """Gets a random song, with optional genre, year, keyword, and artist filters.
 
         - Year mode   (-y only):           query = date:<random_year>
         - Genre mode  (-g only):           query = tag:<genre>
         - Keyword mode (-k only):          query = recording:<keyword>
-        - Any combination works, e.g.:     query = tag:<genre> AND recording:<keyword> AND date:[y TO 2024]
+        - Artist mode (-a only):           query = artist:<artist>
+        - Any combination works, e.g.:     query = tag:<genre> AND artist:<artist> AND recording:<keyword> AND date:[y TO 2024]
         """
         query_parts = []
 
@@ -52,6 +53,11 @@ class MusicBrainzAPI:
         if keyword:
             query_parts.append(f"recording:{keyword}")
             self._log(f"[*] Keyword filter: '{keyword}'")
+
+        if artist_search:
+            # Using quotes to ensure exact phrase match if artist has spaces
+            query_parts.append(f"artist:\"{artist_search}\"")
+            self._log(f"[*] Artist filter: '{artist_search}'")
 
         if year_explicit:
             query_parts.append(f"date:[{min_year} TO 2024]")
@@ -105,7 +111,7 @@ class MusicBrainzAPI:
         release_year = recording.get("first-release-date", "") or ""
         if not release_year and releases:
             release_year = releases[0].get("date", "") or ""
-        if not genre and not keyword and not year_explicit:
+        if not genre and not keyword and not year_explicit and not artist_search:
             result_year = year  # default mode: use the random year we searched for
         else:
             result_year = int(release_year[:4]) if len(release_year) >= 4 and release_year[:4].isdigit() else "Unknown"
@@ -116,7 +122,8 @@ class MusicBrainzAPI:
             "album": album,
             "year": result_year,
             "genre": genre or "",
-            "keyword": keyword or ""
+            "keyword": keyword or "",
+            "artist_search": artist_search or ""
         }
 
 def main():
@@ -125,6 +132,7 @@ def main():
     parser.add_argument('-y', '--year', type=int, default=None, help='Lower limit for the random year (e.g. 1990)')
     parser.add_argument('-g', '--genre', type=str, default=None, help='Filter by genre tag (e.g. rock, jazz, pop)')
     parser.add_argument('-k', '--keyword', type=str, default=None, help='Filter by keyword in track title (e.g. dream, love, night)')
+    parser.add_argument('-a', '--artist', type=str, default=None, help='Filter by artist name (e.g. coldplay, madonna)')
     # Hidden argument exclusively used for spawning background workers
     parser.add_argument('--prefetch', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -137,18 +145,20 @@ def main():
 
     genre = args.genre.lower().strip() if args.genre else None
     keyword = args.keyword.lower().strip() if args.keyword else None
+    artist_search = args.artist.lower().strip() if args.artist else None
 
     # ------ BACKGROUND PREFETCH MODE ------
     if args.prefetch:
         # We run silently in the background
         mb = MusicBrainzAPI(quiet=True)
-        song = mb.get_random_song(min_year, genre, year_explicit, keyword)
+        song = mb.get_random_song(min_year, genre, year_explicit, keyword, artist_search)
         if song:
             # Overwrite the cache file with the new random song
             # Add exactly what was requested for the next retrieval
             song['_requested_min_year'] = min_year if year_explicit else 0
             song['_requested_genre'] = genre or ""
             song['_requested_keyword'] = keyword or ""
+            song['_requested_artist'] = artist_search or ""
             song['_year_explicit'] = year_explicit
             with open(CACHE_FILE, "w") as f:
                 json.dump(song, f)
@@ -167,8 +177,10 @@ def main():
             # All filters must match exactly
             cached_genre   = (song.get('_requested_genre',   "") or "").lower()
             cached_keyword = (song.get('_requested_keyword', "") or "").lower()
+            cached_artist  = (song.get('_requested_artist',  "") or "").lower()
             genre_ok   = cached_genre   == (genre   or "").lower()
             keyword_ok = cached_keyword == (keyword or "").lower()
+            artist_ok  = cached_artist  == (artist_search or "").lower()
 
             # Year check only matters when -y was explicitly requested
             if year_explicit:
@@ -179,7 +191,7 @@ def main():
             else:
                 year_ok = True
 
-            if genre_ok and keyword_ok and year_ok:
+            if genre_ok and keyword_ok and artist_ok and year_ok:
                 cache_valid = True
             else:
                 cache_valid = False
@@ -194,12 +206,14 @@ def main():
             label_parts.append(f"containing '{keyword}'")
         if genre:
             label_parts.append(f"in genre '{genre}'")
+        if artist_search:
+            label_parts.append(f"by '{artist_search}'")
         if year_explicit:
             label_parts.append(f"from {min_year} onwards")
         label = " ".join(label_parts) if label_parts else f"from {min_year} onwards"
         print(f"🎵 Fetching a fresh random song {label}...")
         mb = MusicBrainzAPI(quiet=False)
-        song = mb.get_random_song(min_year, genre, year_explicit, keyword)
+        song = mb.get_random_song(min_year, genre, year_explicit, keyword, artist_search)
 
         if not song:
             print("\nFailed to fetch a random song.")
@@ -218,9 +232,11 @@ def main():
             print(f"Genre  : {song['genre']}")
         if song.get('keyword'):
             print(f"Keyword: {song['keyword']}")
+        if song.get('artist_search'):
+            print(f"Artist Search: {song['artist_search']}")
         print("="*40)
     else:
-        tags = " ".join(f"[{song[k]}]" for k in ('genre', 'keyword') if song.get(k))
+        tags = " ".join(f"[{song[k]}]" for k in ('genre', 'keyword', 'artist_search') if song.get(k))
         suffix = f" {tags}" if tags else ""
         print(f"\nResult: {song['artist']} - {song['title']} ({song['year']}){suffix}")
 
@@ -232,6 +248,8 @@ def main():
         prefetch_cmd += ["-g", genre]
     if keyword:
         prefetch_cmd += ["-k", keyword]
+    if artist_search:
+        prefetch_cmd += ["-a", artist_search]
     subprocess.Popen(
         prefetch_cmd,
         stdout=subprocess.DEVNULL,
